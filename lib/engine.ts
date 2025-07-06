@@ -1,0 +1,277 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
+
+import { current } from "immer";
+import OpenAI from "openai";
+import * as z from "zod/v4";
+import {
+  checkConnectionPrompt,
+  generateActionsPrompt,
+  generateProtagonistPrompt,
+  generateStartingCharactersPrompt,
+  generateStartingLocationPrompt,
+  generateWorldPrompt,
+  narratePrompt,
+  type Prompt,
+} from "./prompts";
+import * as schemas from "./schemas";
+import { type Actions, type NarrationEvent, type State, useStateStore } from "./state";
+
+// When generating a character, the location isn't determined yet.
+const RawCharacter = schemas.Character.omit({ locationIndex: true });
+
+function getState(): State & Actions {
+  return useStateStore.getState();
+}
+
+let controller = new AbortController();
+
+export function abort(): void {
+  controller.abort();
+  // An AbortController cannot be reused after calling abort().
+  controller = new AbortController();
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof OpenAI.APIUserAbortError;
+}
+
+async function* getResponseStream(prompt: Prompt, params: Record<string, unknown> = {}): AsyncGenerator<string> {
+  const client = new OpenAI({
+    baseURL: `${getState().apiUrl}/v1/`,
+    apiKey: "",
+    dangerouslyAllowBrowser: true,
+  });
+
+  const stream = await client.chat.completions.create(
+    {
+      stream: true,
+      model: "",
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+      temperature: 0.5,
+      ...params,
+    },
+    { signal: controller.signal },
+  );
+
+  for await (const chunk of stream) {
+    const choice = chunk.choices[0];
+
+    if (choice.finish_reason) {
+      // We must return directly here instead of just breaking the loop,
+      // because the OpenAI library calls controller.abort() if streaming
+      // is stopped, which would trigger the error-throwing code below.
+      return;
+    }
+
+    if (choice.delta.content) {
+      yield choice.delta.content;
+    }
+  }
+
+  // The OpenAI library only throws this error if abort() is called
+  // during the request itself, not if it is called while the
+  // response is being streamed. We throw it manually in this case,
+  // so error handling code can easily detect whether an error
+  // is the result of a user abort.
+  if (stream.controller.signal.aborted) {
+    throw new OpenAI.APIUserAbortError();
+  }
+}
+
+async function getResponse(
+  prompt: Prompt,
+  params: Record<string, unknown> = {},
+  onToken?: (token: string, count: number) => void,
+): Promise<string> {
+  let response = "";
+  let count = 0;
+
+  // Send empty update at the start of the streaming process
+  // to facilitate displaying progress indicators.
+  if (onToken) {
+    onToken("", 0);
+  }
+
+  for await (const token of getResponseStream(prompt, params)) {
+    response += token;
+    count++;
+
+    if (onToken) {
+      onToken(token, count);
+    }
+  }
+
+  return response;
+}
+
+async function getResponseAsObject<Schema extends z.ZodType, Type extends z.infer<Schema>>(
+  prompt: Prompt,
+  schema: Schema,
+  params: Record<string, unknown> = {},
+  onToken?: (token: string, count: number) => void,
+): Promise<Type> {
+  const response = await getResponse(
+    prompt,
+    {
+      ...params,
+      json_schema: z.toJSONSchema(schema),
+    },
+    onToken,
+  );
+
+  return schema.parse(JSON.parse(response)) as Type;
+}
+
+export async function next(
+  action?: string,
+  onProgress?: (title: string, message: string, tokenCount: number, transientState?: State) => void,
+): Promise<void> {
+  let step: [string, string];
+
+  const onToken = (_token: string, count: number) => {
+    if (onProgress) {
+      onProgress(step[0], step[1], count);
+    }
+  };
+
+  await getState().setAsync(async (state) => {
+    // Validate state before processing to avoid wasting
+    // time and tokens on requests for invalid states.
+    schemas.State.parse(state);
+
+    if (state.view === "connection") {
+      step = ["Checking connection", "If this takes longer than a few seconds, there is probably something wrong"];
+      await getResponse(checkConnectionPrompt, {}, onToken);
+      state.view = "genre";
+    } else if (state.view === "genre") {
+      state.view = "character";
+    } else if (state.view === "character") {
+      step = ["Generating world", "This typically takes between 10 and 30 seconds"];
+      state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, {}, onToken);
+      step = ["Generating protagonist", "This typically takes between 10 and 30 seconds"];
+      state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, {}, onToken);
+      state.protagonist.locationIndex = 0;
+      state.view = "scenario";
+    } else if (state.view === "scenario") {
+      step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
+      state.locations = [
+        await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, {}, onToken),
+      ];
+      const locationIndex = state.locations.length - 1;
+      state.protagonist.locationIndex = locationIndex;
+      step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
+      const characters = await getResponseAsObject(
+        generateStartingCharactersPrompt(state),
+        RawCharacter.array().length(10),
+        {},
+        onToken,
+      );
+      state.characters = characters.map((character) => ({ ...character, locationIndex }));
+      state.events = [
+        {
+          type: "location_change",
+          locationIndex,
+          presentCharacterIndices: characters.map((_, index) => index),
+        },
+      ];
+      state.view = "chat";
+    } else if (state.view === "chat") {
+      state.actions = [];
+      if (onProgress) {
+        onProgress("", "", 0, current(state));
+      }
+
+      if (action) {
+        state.events.push({
+          type: "action",
+          action,
+        });
+        if (onProgress) {
+          onProgress("", "", 0, current(state));
+        }
+      }
+
+      const event: NarrationEvent = {
+        type: "narration",
+        text: "",
+        locationIndex: state.protagonist.locationIndex,
+        referencedCharacterIndices: [],
+      };
+
+      state.events.push(event);
+
+      event.text = await getResponse(narratePrompt(state, action), {}, (token: string, count: number) => {
+        if (onProgress) {
+          event.text += token;
+          onProgress("", "", count, current(state));
+        }
+      });
+
+      const referencedCharacterIndices = new Set<number>();
+
+      // Character names in the text are surrounded with double asterisks
+      // in accordance with the prompt instructions.
+      for (const match of event.text.matchAll(/\*\*(.+?)(?:'s?)?\*\*/g)) {
+        const name = match[1];
+
+        for (const [index, character] of state.characters.entries()) {
+          if (character.name === name || character.name.split(" ")[0] === name) {
+            referencedCharacterIndices.add(index);
+            break;
+          }
+        }
+      }
+
+      event.referencedCharacterIndices = Array.from(referencedCharacterIndices);
+
+      const introducedCharacterIndices = new Set(
+        state.events.filter((event) => event.type === "character_introduction").map((event) => event.characterIndex),
+      );
+
+      for (const characterIndex of event.referencedCharacterIndices) {
+        if (!introducedCharacterIndices.has(characterIndex)) {
+          state.events.push({
+            type: "character_introduction",
+            characterIndex,
+          });
+        }
+      }
+
+      step = ["Generating actions", "This typically takes a few seconds"];
+      state.actions = await getResponseAsObject(
+        generateActionsPrompt(state),
+        schemas.Action.array().length(3),
+        {},
+        onToken,
+      );
+    } else {
+      throw new Error(`Invalid value for state.view: ${state.view}`);
+    }
+
+    // Validate state before returning to prevent
+    // invalid states being committed to the store.
+    schemas.State.parse(state);
+  });
+}
+
+export function back(): void {
+  getState().set((state) => {
+    if (state.view === "connection") {
+      // No previous state exists.
+    } else if (state.view === "genre") {
+      state.view = "connection";
+    } else if (state.view === "character") {
+      state.view = "genre";
+    } else if (state.view === "scenario") {
+      state.view = "character";
+    } else if (state.view === "chat") {
+      // Chat states cannot be unambiguously reversed.
+    } else {
+      throw new Error(`Invalid value for state.view: ${state.view}`);
+    }
+  });
+}
