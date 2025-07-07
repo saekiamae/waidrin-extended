@@ -64,7 +64,9 @@ export default function NarrationEventView({ event }: { event: NarrationEvent })
     (props: any) => {
       const { children } = props;
 
-      if (typeof children === "string" && children.startsWith('"')) {
+      const firstChild = Array.isArray(children) && children.length > 0 ? children[0] : children;
+
+      if (typeof firstChild === "string" && firstChild.startsWith('"')) {
         return <Text color="amber">{children}</Text>;
       } else {
         return <em>{children}</em>;
