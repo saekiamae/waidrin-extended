@@ -51,7 +51,6 @@ async function* getResponseStream(prompt: Prompt, params: Record<string, unknown
         { role: "system", content: prompt.system },
         { role: "user", content: prompt.user },
       ],
-      temperature: 0.5,
       ...params,
     },
     { signal: controller.signal },
@@ -111,13 +110,12 @@ async function getResponse(
 async function getResponseAsObject<Schema extends z.ZodType, Type extends z.infer<Schema>>(
   prompt: Prompt,
   schema: Schema,
-  params: Record<string, unknown> = {},
   onToken?: (token: string, count: number) => void,
 ): Promise<Type> {
   const response = await getResponse(
     prompt,
     {
-      ...params,
+      ...getState().generationParams,
       json_schema: z.toJSONSchema(schema),
     },
     onToken,
@@ -151,23 +149,20 @@ export async function next(
       state.view = "character";
     } else if (state.view === "character") {
       step = ["Generating world", "This typically takes between 10 and 30 seconds"];
-      state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, {}, onToken);
+      state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, onToken);
       step = ["Generating protagonist", "This typically takes between 10 and 30 seconds"];
-      state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, {}, onToken);
+      state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, onToken);
       state.protagonist.locationIndex = 0;
       state.view = "scenario";
     } else if (state.view === "scenario") {
       step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
-      state.locations = [
-        await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, {}, onToken),
-      ];
+      state.locations = [await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken)];
       const locationIndex = state.locations.length - 1;
       state.protagonist.locationIndex = locationIndex;
       step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
       const characters = await getResponseAsObject(
         generateStartingCharactersPrompt(state),
         RawCharacter.array().length(10),
-        {},
         onToken,
       );
       state.characters = characters.map((character) => ({ ...character, locationIndex }));
@@ -204,12 +199,16 @@ export async function next(
 
       state.events.push(event);
 
-      event.text = await getResponse(narratePrompt(state, action), {}, (token: string, count: number) => {
-        if (onProgress) {
-          event.text += token;
-          onProgress("", "", count, current(state));
-        }
-      });
+      event.text = await getResponse(
+        narratePrompt(state, action),
+        state.narrationParams,
+        (token: string, count: number) => {
+          if (onProgress) {
+            event.text += token;
+            onProgress("", "", count, current(state));
+          }
+        },
+      );
 
       const referencedCharacterIndices = new Set<number>();
 
@@ -245,7 +244,6 @@ export async function next(
       state.actions = await getResponseAsObject(
         generateActionsPrompt(state),
         schemas.Action.array().length(3),
-        {},
         onToken,
       );
     } else {

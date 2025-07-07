@@ -37,6 +37,12 @@ export const useStateStore = create<State & Actions>()(
     immer((set, get) => ({
       ...schemas.State.parse({
         apiUrl: "http://localhost:8080",
+        generationParams: {
+          temperature: 0.5,
+        },
+        narrationParams: {
+          temperature: 0.5,
+        },
         view: "connection",
         world: {
           name: "[name]",

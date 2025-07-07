@@ -13,6 +13,8 @@ export const Action = Text.max(200);
 
 const Index = z.int();
 
+const RequestParams = z.record(z.string(), z.unknown());
+
 export const View = z.enum(["connection", "genre", "character", "scenario", "chat"]);
 
 export const World = z.object({
@@ -76,6 +78,8 @@ export const Event = z.discriminatedUnion("type", [
 
 export const State = z.object({
   apiUrl: z.url(),
+  generationParams: RequestParams,
+  narrationParams: RequestParams,
   view: View,
   world: World,
   locations: Location.array(),
