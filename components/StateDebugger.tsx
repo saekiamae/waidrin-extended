@@ -66,6 +66,7 @@ export default function StateDebugger() {
             indentWidth={2}
             collapsed={1}
             collapseStringsAfterLength={100}
+            onAdd={(edit) => setState(edit.updated_src)}
             onEdit={(edit) => setState(edit.updated_src)}
             onDelete={(edit) => setState(edit.updated_src)}
           />
