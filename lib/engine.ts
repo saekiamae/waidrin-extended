@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-import { current } from "immer";
+import { current, isDraft } from "immer";
+import { throttle } from "lodash";
 import OpenAI from "openai";
 import * as z from "zod/v4";
 import {
   checkConnectionPrompt,
+  checkIfSameLocationPrompt,
   generateActionsPrompt,
+  generateNewCharactersPrompt,
+  generateNewLocationPrompt,
   generateProtagonistPrompt,
   generateStartingCharactersPrompt,
   generateStartingLocationPrompt,
@@ -15,7 +19,7 @@ import {
   type Prompt,
 } from "./prompts";
 import * as schemas from "./schemas";
-import { type Actions, type NarrationEvent, type State, useStateStore } from "./state";
+import { type Actions, type LocationChangeEvent, type NarrationEvent, type State, useStateStore } from "./state";
 
 // When generating a character, the location isn't determined yet.
 const RawCharacter = schemas.Character.omit({ locationIndex: true });
@@ -28,8 +32,6 @@ let controller = new AbortController();
 
 export function abort(): void {
   controller.abort();
-  // An AbortController cannot be reused after calling abort().
-  controller = new AbortController();
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -37,47 +39,54 @@ export function isAbortError(error: unknown): boolean {
 }
 
 async function* getResponseStream(prompt: Prompt, params: Record<string, unknown> = {}): AsyncGenerator<string> {
-  const client = new OpenAI({
-    baseURL: `${getState().apiUrl}/v1/`,
-    apiKey: "",
-    dangerouslyAllowBrowser: true,
-  });
+  try {
+    const client = new OpenAI({
+      baseURL: `${getState().apiUrl}/v1/`,
+      apiKey: "",
+      dangerouslyAllowBrowser: true,
+    });
 
-  const stream = await client.chat.completions.create(
-    {
-      stream: true,
-      model: "",
-      messages: [
-        { role: "system", content: prompt.system },
-        { role: "user", content: prompt.user },
-      ],
-      ...params,
-    },
-    { signal: controller.signal },
-  );
+    const stream = await client.chat.completions.create(
+      {
+        stream: true,
+        model: "",
+        messages: [
+          { role: "system", content: prompt.system },
+          { role: "user", content: prompt.user },
+        ],
+        ...params,
+      },
+      { signal: controller.signal },
+    );
 
-  for await (const chunk of stream) {
-    const choice = chunk.choices[0];
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
 
-    if (choice.finish_reason) {
-      // We must return directly here instead of just breaking the loop,
-      // because the OpenAI library calls controller.abort() if streaming
-      // is stopped, which would trigger the error-throwing code below.
-      return;
+      if (choice.finish_reason) {
+        // We must return directly here instead of just breaking the loop,
+        // because the OpenAI library calls controller.abort() if streaming
+        // is stopped, which would trigger the error-throwing code below.
+        return;
+      }
+
+      if (choice.delta.content) {
+        yield choice.delta.content;
+      }
     }
 
-    if (choice.delta.content) {
-      yield choice.delta.content;
+    // The OpenAI library only throws this error if abort() is called
+    // during the request itself, not if it is called while the
+    // response is being streamed. We throw it manually in this case,
+    // so error handling code can easily detect whether an error
+    // is the result of a user abort.
+    if (stream.controller.signal.aborted) {
+      throw new OpenAI.APIUserAbortError();
     }
-  }
-
-  // The OpenAI library only throws this error if abort() is called
-  // during the request itself, not if it is called while the
-  // response is being streamed. We throw it manually in this case,
-  // so error handling code can easily detect whether an error
-  // is the result of a user abort.
-  if (stream.controller.signal.aborted) {
-    throw new OpenAI.APIUserAbortError();
+  } finally {
+    // An AbortController cannot be reused after calling abort().
+    // Reset the controller so a new one is available for the next operation
+    // in case this operation was aborted.
+    controller = new AbortController();
   }
 }
 
@@ -86,6 +95,16 @@ async function getResponse(
   params: Record<string, unknown> = {},
   onToken?: (token: string, count: number) => void,
 ): Promise<string> {
+  const state = getState();
+
+  if (state.logPrompts) {
+    console.log(prompt.user);
+  }
+
+  if (state.logParams) {
+    console.log(isDraft(params) ? current(params) : params);
+  }
+
   let response = "";
   let count = 0;
 
@@ -102,6 +121,10 @@ async function getResponse(
     if (onToken) {
       onToken(token, count);
     }
+  }
+
+  if (state.logResponses) {
+    console.log(response);
   }
 
   return response;
@@ -124,72 +147,40 @@ async function getResponseAsObject<Schema extends z.ZodType, Type extends z.infe
   return schema.parse(JSON.parse(response)) as Type;
 }
 
+async function getResponseAsBoolean(
+  prompt: Prompt,
+  onToken?: (token: string, count: number) => void,
+): Promise<boolean> {
+  return (await getResponseAsObject(prompt, z.enum(["yes", "no"]), onToken)) === "yes";
+}
+
 export async function next(
   action?: string,
-  onProgress?: (title: string, message: string, tokenCount: number, transientState?: State) => void,
+  onProgress?: (title: string, message: string, tokenCount: number) => void,
 ): Promise<void> {
-  let step: [string, string];
-
-  const onToken = (_token: string, count: number) => {
-    if (onProgress) {
-      onProgress(step[0], step[1], count);
-    }
-  };
-
   await getState().setAsync(async (state) => {
-    // Validate state before processing to avoid wasting
-    // time and tokens on requests for invalid states.
-    schemas.State.parse(state);
+    let step: [string, string];
 
-    if (state.view === "connection") {
-      step = ["Checking connection", "If this takes longer than a few seconds, there is probably something wrong"];
-      await getResponse(checkConnectionPrompt, {}, onToken);
-      state.view = "genre";
-    } else if (state.view === "genre") {
-      state.view = "character";
-    } else if (state.view === "character") {
-      step = ["Generating world", "This typically takes between 10 and 30 seconds"];
-      state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, onToken);
-      step = ["Generating protagonist", "This typically takes between 10 and 30 seconds"];
-      state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, onToken);
-      state.protagonist.locationIndex = 0;
-      state.view = "scenario";
-    } else if (state.view === "scenario") {
-      step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
-      state.locations = [await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken)];
-      const locationIndex = state.locations.length - 1;
-      state.protagonist.locationIndex = locationIndex;
-      step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
-      const characters = await getResponseAsObject(
-        generateStartingCharactersPrompt(state),
-        RawCharacter.array().length(10),
-        onToken,
-      );
-      state.characters = characters.map((character) => ({ ...character, locationIndex }));
-      state.events = [
-        {
-          type: "location_change",
-          locationIndex,
-          presentCharacterIndices: characters.map((_, index) => index),
-        },
-      ];
-      state.view = "chat";
-    } else if (state.view === "chat") {
-      state.actions = [];
-      if (onProgress) {
-        onProgress("", "", 0, current(state));
-      }
-
-      if (action) {
-        state.events.push({
-          type: "action",
-          action,
-        });
+    const onToken = throttle(
+      (_token: string, count: number) => {
         if (onProgress) {
-          onProgress("", "", 0, current(state));
+          onProgress(step[0], step[1], count);
         }
-      }
+      },
+      state.updateInterval,
+      { leading: true, trailing: true },
+    );
 
+    const updateState = throttle(
+      () => {
+        // TODO: Can the call to current() be removed?
+        getState().set(current(state));
+      },
+      state.updateInterval,
+      { leading: true, trailing: true },
+    );
+
+    const narrate = async (action?: string) => {
       const event: NarrationEvent = {
         type: "narration",
         text: "",
@@ -202,11 +193,9 @@ export async function next(
       event.text = await getResponse(
         narratePrompt(state, action),
         state.narrationParams,
-        (token: string, count: number) => {
-          if (onProgress) {
-            event.text += token;
-            onProgress("", "", count, current(state));
-          }
+        (token: string, _count: number) => {
+          event.text += token;
+          updateState();
         },
       );
 
@@ -237,22 +226,137 @@ export async function next(
             type: "character_introduction",
             characterIndex,
           });
+          updateState();
         }
       }
+    };
 
-      step = ["Generating actions", "This typically takes a few seconds"];
-      state.actions = await getResponseAsObject(
-        generateActionsPrompt(state),
-        schemas.Action.array().length(3),
-        onToken,
-      );
-    } else {
-      throw new Error(`Invalid value for state.view: ${state.view}`);
+    try {
+      // Validate state before processing to avoid wasting
+      // time and tokens on requests for invalid states.
+      schemas.State.parse(state);
+
+      if (state.view === "connection") {
+        step = ["Checking connection", "If this takes longer than a few seconds, there is probably something wrong"];
+        await getResponse(checkConnectionPrompt, {}, onToken);
+
+        state.view = "genre";
+      } else if (state.view === "genre") {
+        state.view = "character";
+      } else if (state.view === "character") {
+        step = ["Generating world", "This typically takes between 10 and 30 seconds"];
+        state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, onToken);
+
+        step = ["Generating protagonist", "This typically takes between 10 and 30 seconds"];
+        state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, onToken);
+        state.protagonist.locationIndex = 0;
+
+        state.view = "scenario";
+      } else if (state.view === "scenario") {
+        step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
+        state.locations = [await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken)];
+        const locationIndex = state.locations.length - 1;
+        state.protagonist.locationIndex = locationIndex;
+
+        step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
+        const characters = await getResponseAsObject(
+          generateStartingCharactersPrompt(state),
+          RawCharacter.array().length(10),
+          onToken,
+        );
+        state.characters = characters.map((character) => ({ ...character, locationIndex }));
+
+        state.events = [
+          {
+            type: "location_change",
+            locationIndex,
+            presentCharacterIndices: state.characters.map((_, index) => index),
+          },
+        ];
+
+        state.view = "chat";
+      } else if (state.view === "chat") {
+        state.actions = [];
+        updateState();
+
+        if (action) {
+          state.events.push({
+            type: "action",
+            action,
+          });
+          updateState();
+        }
+
+        await narrate(action);
+
+        step = ["Checking for location change", "This typically takes a few seconds"];
+        if (!(await getResponseAsBoolean(checkIfSameLocationPrompt(state), onToken))) {
+          const schema = z.object({
+            newLocation: schemas.Location,
+            accompanyingCharacters: z.enum(state.characters.map((character) => character.name)).array(),
+          });
+
+          step = ["Generating location", "This typically takes between 10 and 30 seconds"];
+          const newLocationInfo = await getResponseAsObject(generateNewLocationPrompt(state), schema, onToken);
+
+          state.locations.push(newLocationInfo.newLocation);
+          const locationIndex = state.locations.length - 1;
+          state.protagonist.locationIndex = locationIndex;
+
+          const accompanyingCharacterIndices = state.characters
+            .map((character, index) => (newLocationInfo.accompanyingCharacters.includes(character.name) ? index : -1))
+            .filter((index) => index >= 0);
+
+          for (const index of accompanyingCharacterIndices) {
+            state.characters[index].locationIndex = locationIndex;
+          }
+
+          // Must be called *before* adding the location change event to the state!
+          const generateCharactersPrompt = generateNewCharactersPrompt(state, newLocationInfo.accompanyingCharacters);
+
+          const event: LocationChangeEvent = {
+            type: "location_change",
+            locationIndex,
+            presentCharacterIndices: accompanyingCharacterIndices,
+          };
+
+          state.events.push(event);
+          updateState();
+
+          step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
+          const characters = await getResponseAsObject(
+            generateCharactersPrompt,
+            RawCharacter.array().length(10),
+            onToken,
+          );
+          state.characters.push(...characters.map((character) => ({ ...character, locationIndex })));
+
+          for (let i = state.characters.length - characters.length; i < state.characters.length; i++) {
+            event.presentCharacterIndices.push(i);
+          }
+
+          await narrate();
+        }
+
+        step = ["Generating actions", "This typically takes a few seconds"];
+        state.actions = await getResponseAsObject(
+          generateActionsPrompt(state),
+          schemas.Action.array().length(3),
+          onToken,
+        );
+      } else {
+        throw new Error(`Invalid value for state.view: ${state.view}`);
+      }
+
+      // Validate state before returning to prevent
+      // invalid states being committed to the store.
+      schemas.State.parse(state);
+    } finally {
+      // Cancel any pending partial updates to avoid confusing the frontend
+      // by a partial update arriving after the function returns.
+      onToken.cancel();
+      updateState.cancel();
     }
-
-    // Validate state before returning to prevent
-    // invalid states being committed to the store.
-    schemas.State.parse(state);
   });
 }
 

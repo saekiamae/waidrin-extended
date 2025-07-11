@@ -151,3 +151,43 @@ Return the options as a JSON array of strings.
     state,
   );
 }
+
+export function checkIfSameLocationPrompt(state: State): Prompt {
+  return makeMainPrompt(
+    `
+Is the protagonist (${state.protagonist.name}) still at ${state.locations[state.protagonist.locationIndex].name}?
+Answer with "yes" or "no".
+`,
+    state,
+  );
+}
+
+export function generateNewLocationPrompt(state: State): Prompt {
+  return makeMainPrompt(
+    `
+The protagonist (${state.protagonist.name}) has left ${state.locations[state.protagonist.locationIndex].name}.
+Return the name and type of their new location, and a short description (100 words maximum), as a JSON object.
+Also include the names of the characters that are going to accompany ${state.protagonist.name} there, if any.
+`,
+    state,
+  );
+}
+
+// Must be called *before* adding the location change event to the state!
+export function generateNewCharactersPrompt(state: State, accompanyingCharacters: string[]): Prompt {
+  const location = state.locations[state.protagonist.locationIndex];
+
+  return makeMainPrompt(
+    `
+The protagonist (${state.protagonist.name}) is about to enter ${location.name}. ${location.description}
+
+${accompanyingCharacters.length > 0 ? `${state.protagonist.name} is accompanied by the following characters: ${accompanyingCharacters.join(", ")}.` : ""}
+
+Create ten additional, new characters that ${state.protagonist.name} might encounter at ${location.name}.
+Do not reuse characters that have already appeared in the story.
+Return the character descriptions as an array of JSON objects.
+Include a short biography (100 words maximum) for each character.
+`,
+    state,
+  );
+}

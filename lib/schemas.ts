@@ -34,7 +34,7 @@ export const Character = z.object({
   locationIndex: Index,
 });
 
-export const LocationType = z.enum(["tavern", "keep", "market"]);
+export const LocationType = z.enum(["tavern", "market", "street", "road"]);
 
 export const Location = z.object({
   name: Name,
@@ -80,6 +80,10 @@ export const State = z.object({
   apiUrl: z.url(),
   generationParams: RequestParams,
   narrationParams: RequestParams,
+  updateInterval: z.int(),
+  logPrompts: z.boolean(),
+  logParams: z.boolean(),
+  logResponses: z.boolean(),
   view: View,
   world: World,
   locations: Location.array(),

@@ -8,12 +8,13 @@ import { useShallow } from "zustand/shallow";
 import { useStateStore } from "@/lib/state";
 import CharacterView from "./CharacterView";
 
-export default function ActionChoice({ actions, onAction }: { actions: string[]; onAction: (action: string) => void }) {
+export default function ActionChoice({ onAction }: { onAction: (action: string) => void }) {
   const [customAction, setCustomAction] = useState("");
 
-  const { protagonist } = useStateStore(
+  const { protagonist, actions } = useStateStore(
     useShallow((state) => ({
       protagonist: state.protagonist,
+      actions: state.actions,
     })),
   );
 

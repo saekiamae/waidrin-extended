@@ -26,7 +26,7 @@ export default function Home() {
 
   const nextView = async () => {
     try {
-      await next(undefined, (title, message, tokenCount, _transientState) => {
+      await next(undefined, (title, message, tokenCount) => {
         setOverlayVisible(true);
         setOverlayTitle(title);
         setOverlayMessage(message);

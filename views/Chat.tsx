@@ -2,7 +2,7 @@
 // Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
 import { Flex, ScrollArea } from "@radix-ui/themes";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/shallow";
 import ActionChoice from "@/components/ActionChoice";
 import EventView from "@/components/EventView";
@@ -17,19 +17,11 @@ export default function Chat() {
     })),
   );
 
-  const [displayedEvents, setDisplayedEvents] = useState(events);
-  const [displayedActions, setDisplayedActions] = useState(actions);
-
   const eventsContainerRef = useRef<HTMLDivElement | null>(null);
 
   const doAction = async (action?: string) => {
     try {
-      await next(action, (_title, _message, _tokenCount, transientState) => {
-        if (transientState) {
-          setDisplayedEvents(transientState.events);
-          setDisplayedActions(transientState.actions);
-        }
-      });
+      await next(action);
     } catch (error) {
       if (!isAbortError(error)) {
         let message = error instanceof Error ? error.message : String(error);
@@ -43,12 +35,6 @@ export default function Chat() {
     }
   };
 
-  // Keep the displayed events and actions synchronized with those in the state store.
-  useEffect(() => {
-    setDisplayedEvents(events);
-    setDisplayedActions(actions);
-  }, [events, actions]);
-
   // Scroll to the bottom of the events container when new content is added.
   //
   // biome-ignore lint/correctness/useExhaustiveDependencies: The dependency is indirect.
@@ -60,14 +46,14 @@ export default function Chat() {
         behavior: "smooth",
       });
     }
-  }, [displayedEvents]);
+  }, [events]);
 
   // Forward the state machine once after transitioning to the chat view
   // to generate initial narration and actions.
   //
   // biome-ignore lint/correctness/useExhaustiveDependencies: This should run only once.
   useEffect(() => {
-    if (displayedActions.length === 0) {
+    if (actions.length === 0) {
       doAction();
 
       // Note that in Strict Mode (used during development), React runs the effect twice
@@ -87,14 +73,14 @@ export default function Chat() {
       >
         <ScrollArea ref={eventsContainerRef}>
           <Flex direction="column">
-            {displayedEvents.map((event, index) => (
+            {events.map((event, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: Events are append-only, so this is valid.
               <EventView key={index} event={event} />
             ))}
           </Flex>
         </ScrollArea>
 
-        {displayedActions.length > 0 && <ActionChoice actions={displayedActions} onAction={doAction} />}
+        {actions.length > 0 && <ActionChoice onAction={doAction} />}
       </Flex>
     </Flex>
   );

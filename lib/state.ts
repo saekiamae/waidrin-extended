@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
+import { Mutex } from "async-mutex";
 import { createDraft, finishDraft, type WritableDraft } from "immer";
 import type * as z from "zod/v4";
 import { create } from "zustand";
@@ -32,6 +33,8 @@ export interface Actions {
   setAsync: (updater: (state: WritableDraft<State>) => Promise<void>) => Promise<void>;
 }
 
+const setAsyncMutex = new Mutex();
+
 export const useStateStore = create<State & Actions>()(
   persist(
     immer((set, get) => ({
@@ -43,6 +46,10 @@ export const useStateStore = create<State & Actions>()(
         narrationParams: {
           temperature: 0.5,
         },
+        updateInterval: 200,
+        logPrompts: false,
+        logParams: false,
+        logResponses: false,
         view: "connection",
         world: {
           name: "[name]",
@@ -69,15 +76,26 @@ export const useStateStore = create<State & Actions>()(
 
       set: set,
       setAsync: async (updater) => {
-        // According to https://immerjs.github.io/immer/async/, this is an "anti-pattern", because
-        // "updates [...] that happen during the async process, would be "missed" by the draft".
-        // However, for our use case, this is actually exactly what we want, because it prevents
-        // manual updates during state machine operations from producing inconsistent states.
-        const state = get();
-        const draft = createDraft(state);
-        await updater(draft);
-        const newState = finishDraft(draft);
-        set(newState);
+        await setAsyncMutex.runExclusive(async () => {
+          // According to https://immerjs.github.io/immer/async/, this is an "anti-pattern", because
+          // "updates [...] that happen during the async process, would be "missed" by the draft".
+          // However, for our use case, this is actually exactly what we want, because it prevents
+          // manual updates during state machine operations from producing inconsistent states.
+          const state = get();
+          const draft = createDraft(state);
+
+          try {
+            await updater(draft);
+          } catch (error) {
+            // Roll back any changes the updater may have written to the state store.
+            set(state);
+            // Re-throw the error to be handled by higher-level logic.
+            throw error;
+          }
+
+          const newState = finishDraft(draft);
+          set(newState);
+        });
       },
     })),
     {
