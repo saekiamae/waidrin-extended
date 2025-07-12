@@ -190,11 +190,13 @@ export async function next(
 
       state.events.push(event);
 
+      step = ["Narrating", ""];
       event.text = await getResponse(
         narratePrompt(state, action),
         state.narrationParams,
-        (token: string, _count: number) => {
+        (token: string, count: number) => {
           event.text += token;
+          onToken(token, count);
           updateState();
         },
       );

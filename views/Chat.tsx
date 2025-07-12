@@ -1,15 +1,43 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-import { Flex, ScrollArea } from "@radix-ui/themes";
-import { useEffect, useRef } from "react";
+import { Flex, ScrollArea, Text } from "@radix-ui/themes";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import ActionChoice from "@/components/ActionChoice";
+import ErrorBar from "@/components/ErrorBar";
 import EventView from "@/components/EventView";
+import ProcessingBar from "@/components/ProcessingBar";
 import { abort, isAbortError, next } from "@/lib/engine";
 import { useStateStore } from "@/lib/state";
 
 export default function Chat() {
+  const [lastAction, setLastAction] = useState<string | undefined>(undefined);
+  const [barVisible, setBarVisible] = useState(false);
+  const [barTitle, setBarTitle] = useState("");
+  const [barTokenCount, setBarTokenCount] = useState(0);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const doAction = async (action?: string) => {
+    try {
+      await next(action, (title, _message, tokenCount) => {
+        setBarVisible(true);
+        setBarTitle(title);
+        setBarTokenCount(tokenCount);
+      });
+    } catch (error) {
+      if (!isAbortError(error)) {
+        let message = error instanceof Error ? error.message : String(error);
+        if (!message) {
+          message = "Unknown error";
+        }
+        setErrorMessage(message);
+      }
+    } finally {
+      setBarVisible(false);
+    }
+  };
+
   const { events, actions } = useStateStore(
     useShallow((state) => ({
       events: state.events,
@@ -18,22 +46,6 @@ export default function Chat() {
   );
 
   const eventsContainerRef = useRef<HTMLDivElement | null>(null);
-
-  const doAction = async (action?: string) => {
-    try {
-      await next(action);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        let message = error instanceof Error ? error.message : String(error);
-        if (!message) {
-          message = "Unknown error";
-        }
-        console.error(message);
-      }
-    } finally {
-      // TODO
-    }
-  };
 
   // Scroll to the bottom of the events container when new content is added.
   //
@@ -80,7 +92,33 @@ export default function Chat() {
           </Flex>
         </ScrollArea>
 
-        {actions.length > 0 && <ActionChoice onAction={doAction} />}
+        {actions.length > 0 && !errorMessage && (
+          <ActionChoice
+            onAction={(action) => {
+              setLastAction(action);
+              doAction(action);
+            }}
+          />
+        )}
+
+        {barVisible && (
+          <ProcessingBar title={barTitle} onCancel={abort}>
+            <Text className="tabular-nums" as="div" align="right" size="4" color="lime" mr="2">
+              {barTokenCount ? `Tokens generated: ${barTokenCount}` : "Waiting for response..."}
+            </Text>
+          </ProcessingBar>
+        )}
+
+        {errorMessage && (
+          <ErrorBar
+            errorMessage={errorMessage}
+            onRetry={() => {
+              setErrorMessage("");
+              doAction(lastAction);
+            }}
+            onCancel={() => setErrorMessage("")}
+          />
+        )}
       </Flex>
     </Flex>
   );

@@ -71,9 +71,9 @@ export default function Home() {
       {errorMessage && (
         <ErrorPopup
           errorMessage={errorMessage}
-          onRetry={async () => {
+          onRetry={() => {
             setErrorMessage("");
-            await nextView();
+            nextView();
           }}
           onCancel={() => setErrorMessage("")}
         />
