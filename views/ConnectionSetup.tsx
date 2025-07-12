@@ -52,9 +52,11 @@ export default function ConnectionSetup({ onNext, onBack }: { onNext?: () => voi
 
           <Box>
             <Text size="5" color="mint">
-              The recommended model is <strong>Mistral Small 2501</strong>. GGUFs are available{" "}
-              <Link href="https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF">here</Link>. Use
-              whichever quant fits your VRAM. Make sure you load the model with a context size of at least{" "}
+              The recommended model is <strong>Mistral Small 2506</strong>. GGUFs are available{" "}
+              <Link href="https://huggingface.co/bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF">
+                here
+              </Link>
+              . Use whichever quant fits your VRAM. Make sure you load the model with a context size of at least{" "}
               <strong>16k</strong>.
             </Text>
           </Box>
