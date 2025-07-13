@@ -34,7 +34,7 @@ export const Character = z.object({
   locationIndex: Index,
 });
 
-export const LocationType = z.enum(["tavern", "market", "street", "road"]);
+export const LocationType = z.enum(["tavern", "market", "road"]);
 
 export const Location = z.object({
   name: Name,
