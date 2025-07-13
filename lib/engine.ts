@@ -245,7 +245,9 @@ export async function next(
       // time and tokens on requests for invalid states.
       schemas.State.parse(state);
 
-      if (state.view === "connection") {
+      if (state.view === "welcome") {
+        state.view = "connection";
+      } else if (state.view === "connection") {
         step = ["Checking connection", "If this takes longer than a few seconds, there is probably something wrong"];
         await getResponse(checkConnectionPrompt, {}, onToken);
 
@@ -371,8 +373,10 @@ export async function next(
 
 export function back(): void {
   getState().set((state) => {
-    if (state.view === "connection") {
+    if (state.view === "welcome") {
       // No previous state exists.
+    } else if (state.view === "connection") {
+      state.view = "welcome";
     } else if (state.view === "genre") {
       state.view = "connection";
     } else if (state.view === "character") {

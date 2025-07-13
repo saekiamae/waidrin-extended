@@ -17,6 +17,7 @@ import Chat from "@/views/Chat";
 import ConnectionSetup from "@/views/ConnectionSetup";
 import GenreSelect from "@/views/GenreSelect";
 import ScenarioSetup from "@/views/ScenarioSetup";
+import Welcome from "@/views/Welcome";
 
 export default function Home() {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -50,7 +51,8 @@ export default function Home() {
 
   return (
     <>
-      {view === "connection" && <ConnectionSetup onNext={nextView} />}
+      {view === "welcome" && <Welcome onNext={nextView} />}
+      {view === "connection" && <ConnectionSetup onNext={nextView} onBack={back} />}
       {view === "genre" && <GenreSelect onNext={nextView} onBack={back} />}
       {view === "character" && <CharacterSelect onNext={nextView} onBack={back} />}
       {view === "scenario" && <ScenarioSetup onNext={nextView} onBack={back} />}

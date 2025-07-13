@@ -15,7 +15,7 @@ const Index = z.int();
 
 const RequestParams = z.record(z.string(), z.unknown());
 
-export const View = z.enum(["connection", "genre", "character", "scenario", "chat"]);
+export const View = z.enum(["welcome", "connection", "genre", "character", "scenario", "chat"]);
 
 export const World = z.object({
   name: Name,

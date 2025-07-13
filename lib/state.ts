@@ -39,7 +39,7 @@ export const initialState: State = schemas.State.parse({
   logPrompts: false,
   logParams: false,
   logResponses: false,
-  view: "connection",
+  view: "welcome",
   world: {
     name: "[name]",
     description: "[description]",
