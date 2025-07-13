@@ -44,7 +44,9 @@ export const useStateStore = create<State & Actions>()(
           temperature: 0.5,
         },
         narrationParams: {
-          temperature: 0.5,
+          temperature: 0.6,
+          min_p: 0.03,
+          dry_multiplier: 0.8,
         },
         updateInterval: 200,
         logPrompts: false,

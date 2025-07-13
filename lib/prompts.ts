@@ -68,7 +68,7 @@ The protagonist is ${state.protagonist.name}. ${state.protagonist.biography}
 
 ${state.protagonist.name} is about to enter ${location.name}. ${location.description}
 
-Create ten characters that ${state.protagonist.name} might encounter at ${location.name}.
+Create 5 characters that ${state.protagonist.name} might encounter at ${location.name}.
 Return the character descriptions as an array of JSON objects.
 Include a short biography (100 words maximum) for each character.
 `);
@@ -130,10 +130,11 @@ export function narratePrompt(state: State, action?: string): Prompt {
 ${action ? `The protagonist (${state.protagonist.name}) has chosen to do the following: ${action}.` : ""}
 Narrate what happens next, using novel-style prose, in the present tense.
 Prioritize dialogue over descriptions.
-Do not mention more than two or three different characters in your narration.
+Do not mention more than 2 different characters in your narration.
 Refer to characters using their first names.
 Make all character names bold by surrounding them with double asterisks (**Name**).
-Write between three and five paragraphs. Stop when it is the protagonist's turn to speak or act.
+Write 2-3 paragraphs (no more than 200 words in total).
+Stop when it is the protagonist's turn to speak or act.
 Remember to refer to the protagonist (${state.protagonist.name}) as "you" in your narration.
 Do not explicitly ask the protagonist for a response at the end; they already know what is expected of them.
 `,
@@ -144,7 +145,7 @@ Do not explicitly ask the protagonist for a response at the end; they already kn
 export function generateActionsPrompt(state: State): Prompt {
   return makeMainPrompt(
     `
-Suggest three options for what the protagonist (${state.protagonist.name}) could do or say next.
+Suggest 3 options for what the protagonist (${state.protagonist.name}) could do or say next.
 Each option should be a single, short sentence that starts with a verb.
 Return the options as a JSON array of strings.
 `,
@@ -183,7 +184,7 @@ The protagonist (${state.protagonist.name}) is about to enter ${location.name}. 
 
 ${accompanyingCharacters.length > 0 ? `${state.protagonist.name} is accompanied by the following characters: ${accompanyingCharacters.join(", ")}.` : ""}
 
-Create ten additional, new characters that ${state.protagonist.name} might encounter at ${location.name}.
+Create 5 additional, new characters that ${state.protagonist.name} might encounter at ${location.name}.
 Do not reuse characters that have already appeared in the story.
 Return the character descriptions as an array of JSON objects.
 Include a short biography (100 words maximum) for each character.

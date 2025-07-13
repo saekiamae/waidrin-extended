@@ -260,10 +260,10 @@ export async function next(
         const locationIndex = state.locations.length - 1;
         state.protagonist.locationIndex = locationIndex;
 
-        step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
+        step = ["Generating characters", "This typically takes between 30 seconds and 1 minute"];
         const characters = await getResponseAsObject(
           generateStartingCharactersPrompt(state),
-          RawCharacter.array().length(10),
+          RawCharacter.array().length(5),
           onToken,
         );
         state.characters = characters.map((character) => ({ ...character, locationIndex }));
@@ -325,10 +325,10 @@ export async function next(
           state.events.push(event);
           updateState();
 
-          step = ["Generating characters", "This typically takes between 1 and 3 minutes"];
+          step = ["Generating characters", "This typically takes between 30 seconds and 1 minute"];
           const characters = await getResponseAsObject(
             generateCharactersPrompt,
-            RawCharacter.array().length(10),
+            RawCharacter.array().length(5),
             onToken,
           );
           state.characters.push(...characters.map((character) => ({ ...character, locationIndex })));
