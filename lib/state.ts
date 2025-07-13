@@ -25,6 +25,46 @@ export type LocationChangeEvent = z.infer<typeof schemas.LocationChangeEvent>;
 export type Event = z.infer<typeof schemas.Event>;
 export type State = z.infer<typeof schemas.State>;
 
+export const initialState: State = schemas.State.parse({
+  apiUrl: "http://localhost:8080",
+  generationParams: {
+    temperature: 0.5,
+  },
+  narrationParams: {
+    temperature: 0.6,
+    min_p: 0.03,
+    dry_multiplier: 0.8,
+  },
+  updateInterval: 200,
+  logPrompts: false,
+  logParams: false,
+  logResponses: false,
+  view: "connection",
+  world: {
+    name: "[name]",
+    description: "[description]",
+  },
+  locations: [],
+  characters: [],
+  protagonist: {
+    name: "[name]",
+    gender: "male",
+    race: "human",
+    biography: "[biography]",
+    locationIndex: 0,
+  },
+  hiddenDestiny: false,
+  betrayal: false,
+  oppositeSexMagnet: false,
+  sameSexMagnet: false,
+  sexualContentLevel: "regular",
+  violentContentLevel: "regular",
+  events: [],
+  actions: [],
+});
+
+const setAsyncMutex = new Mutex();
+
 export interface Actions {
   set: (
     nextStateOrUpdater: State | Partial<State> | ((state: WritableDraft<State>) => void),
@@ -33,49 +73,10 @@ export interface Actions {
   setAsync: (updater: (state: WritableDraft<State>) => Promise<void>) => Promise<void>;
 }
 
-const setAsyncMutex = new Mutex();
-
 export const useStateStore = create<State & Actions>()(
   persist(
     immer((set, get) => ({
-      ...schemas.State.parse({
-        apiUrl: "http://localhost:8080",
-        generationParams: {
-          temperature: 0.5,
-        },
-        narrationParams: {
-          temperature: 0.6,
-          min_p: 0.03,
-          dry_multiplier: 0.8,
-        },
-        updateInterval: 200,
-        logPrompts: false,
-        logParams: false,
-        logResponses: false,
-        view: "connection",
-        world: {
-          name: "[name]",
-          description: "[description]",
-        },
-        locations: [],
-        characters: [],
-        protagonist: {
-          name: "[name]",
-          gender: "male",
-          race: "human",
-          biography: "[biography]",
-          locationIndex: 0,
-        },
-        hiddenDestiny: false,
-        betrayal: false,
-        oppositeSexMagnet: false,
-        sameSexMagnet: false,
-        sexualContentLevel: "regular",
-        violentContentLevel: "regular",
-        events: [],
-        actions: [],
-      }),
-
+      ...initialState,
       set: set,
       setAsync: async (updater) => {
         await setAsyncMutex.runExclusive(async () => {

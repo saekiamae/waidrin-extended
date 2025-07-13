@@ -19,7 +19,14 @@ import {
   type Prompt,
 } from "./prompts";
 import * as schemas from "./schemas";
-import { type Actions, type LocationChangeEvent, type NarrationEvent, type State, useStateStore } from "./state";
+import {
+  type Actions,
+  initialState,
+  type LocationChangeEvent,
+  type NarrationEvent,
+  type State,
+  useStateStore,
+} from "./state";
 
 // When generating a character, the location isn't determined yet.
 const RawCharacter = schemas.Character.omit({ locationIndex: true });
@@ -378,4 +385,8 @@ export function back(): void {
       throw new Error(`Invalid value for state.view: ${state.view}`);
     }
   });
+}
+
+export function reset(): void {
+  getState().set(initialState);
 }

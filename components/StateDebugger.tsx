@@ -38,7 +38,7 @@ export default function StateDebugger() {
           </>
         }
       >
-        <IconButton onClick={() => setDialogOpen(true)} className="fixed top-3 right-3" variant="ghost">
+        <IconButton onClick={() => setDialogOpen(true)} className="fixed top-3 right-3" variant="ghost" color="gray">
           <GiAllSeeingEye size="35" />
         </IconButton>
       </Tooltip>
