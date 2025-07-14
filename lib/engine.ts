@@ -146,7 +146,14 @@ async function getResponseAsObject<Schema extends z.ZodType, Type extends z.infe
     prompt,
     {
       ...getState().generationParams,
-      json_schema: z.toJSONSchema(schema),
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "FooBar",
+          strict: true,
+          schema: z.toJSONSchema(schema),
+        },
+      },
     },
     onToken,
   );
