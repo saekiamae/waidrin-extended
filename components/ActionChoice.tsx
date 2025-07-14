@@ -63,6 +63,7 @@ export default function ActionChoice({ onAction }: { onAction: (action: string) 
         color="sky"
         size="3"
         placeholder="Something else..."
+        maxLength={200}
         onKeyDown={(event) => {
           if (event.key === "Enter" && customAction) {
             onAction(customAction);
