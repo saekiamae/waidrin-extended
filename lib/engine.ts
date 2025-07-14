@@ -74,17 +74,21 @@ async function* getResponseStream(prompt: Prompt, params: Record<string, unknown
     );
 
     for await (const chunk of stream) {
-      const choice = chunk.choices[0];
-
-      if (choice.finish_reason) {
+      if (chunk.choices.length === 0) {
         // We must return directly here instead of just breaking the loop,
         // because the OpenAI library calls controller.abort() if streaming
         // is stopped, which would trigger the error-throwing code below.
         return;
       }
 
+      const choice = chunk.choices[0];
+
       if (choice.delta.content) {
         yield choice.delta.content;
+      }
+
+      if (choice.finish_reason) {
+        return;
       }
     }
 
