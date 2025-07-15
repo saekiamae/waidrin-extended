@@ -26,8 +26,7 @@ any other.
 
 ## Genre selection screen
 
-Note that only the fantasy genre is currently implemented; choosing another genre
-has no effect.
+Note that only the fantasy genre is currently implemented.
 
 ![Genre](https://github.com/user-attachments/assets/d3d168f6-2d19-4917-8be9-cc3b2869a56a)
 
