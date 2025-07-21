@@ -4,27 +4,107 @@
 "use client";
 
 import { Text } from "@radix-ui/themes";
-import { useState } from "react";
+import { current } from "immer";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import ErrorPopup from "@/components/ErrorPopup";
 import MainMenu from "@/components/MainMenu";
 import ProcessingOverlay from "@/components/ProcessingOverlay";
 import StateDebugger from "@/components/StateDebugger";
 import { abort, back, isAbortError, next } from "@/lib/engine";
-import { useStateStore } from "@/lib/state";
+import { type Plugin, type PluginWrapper, useStateStore } from "@/lib/state";
 import CharacterSelect from "@/views/CharacterSelect";
 import Chat from "@/views/Chat";
 import ConnectionSetup from "@/views/ConnectionSetup";
 import GenreSelect from "@/views/GenreSelect";
 import ScenarioSetup from "@/views/ScenarioSetup";
 import Welcome from "@/views/Welcome";
+import type { Manifest } from "./plugins/route";
 
 export default function Home() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayMessage, setOverlayMessage] = useState("");
   const [overlayTokenCount, setOverlayTokenCount] = useState(0);
+  const [onOverlayCancel, setOnOverlayCancel] = useState<(() => void) | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState("");
+  const [onErrorRetry, setOnErrorRetry] = useState<(() => void) | undefined>(undefined);
+  const [onErrorCancel, setOnErrorCancel] = useState<(() => void) | undefined>(undefined);
+
+  const { view, setStateAsync } = useStateStore(
+    useShallow((state) => ({
+      view: state.view,
+      setStateAsync: state.setAsync,
+    })),
+  );
+
+  const loadPlugins = async () => {
+    setOverlayVisible(true);
+    setOverlayTitle("Loading plugins");
+    setOverlayMessage("Loading manifests...");
+    setOverlayTokenCount(-1);
+    setOnOverlayCancel(undefined);
+
+    try {
+      await setStateAsync(async (state) => {
+        const response = await fetch("/plugins");
+        const manifests: Manifest[] = await response.json();
+
+        outer: for (const manifest of manifests) {
+          let pluginWrapper: PluginWrapper | null = null;
+
+          for (const plugin of state.plugins) {
+            if (plugin.name === manifest.name) {
+              if (!plugin.enabled) {
+                // Don't load disabled plugins at all.
+                continue outer;
+              }
+
+              pluginWrapper = plugin;
+              break;
+            }
+          }
+
+          setOverlayMessage(`Loading plugin "${manifest.name}"...`);
+
+          const module = await import(/* webpackIgnore: true */ `/plugins/${manifest.path}/${manifest.main}`);
+          const pluginClass = module.default;
+          const plugin: Plugin = new pluginClass();
+
+          if (plugin.init) {
+            await plugin.init(pluginWrapper ? current(pluginWrapper.settings) : manifest.settings, undefined);
+          }
+
+          if (pluginWrapper) {
+            // Preserve settings for plugins loaded from state store;
+            // only replace the plugin module itself.
+            pluginWrapper.plugin = plugin;
+          } else {
+            // Plugin is new.
+            state.plugins.push({
+              name: manifest.name,
+              enabled: true,
+              settings: manifest.settings,
+              plugin,
+            });
+          }
+        }
+      });
+    } catch (error) {
+      let message = error instanceof Error ? error.message : String(error);
+      if (!message) {
+        message = "Unknown error";
+      }
+      setErrorMessage(message);
+      setOnErrorRetry(() => () => {
+        setErrorMessage("");
+        loadPlugins();
+      });
+      setOnErrorCancel(undefined);
+    } finally {
+      setOverlayVisible(false);
+    }
+  };
 
   const nextView = async () => {
     try {
@@ -33,6 +113,7 @@ export default function Home() {
         setOverlayTitle(title);
         setOverlayMessage(message);
         setOverlayTokenCount(tokenCount);
+        setOnOverlayCancel(() => abort);
       });
     } catch (error) {
       if (!isAbortError(error)) {
@@ -41,13 +122,21 @@ export default function Home() {
           message = "Unknown error";
         }
         setErrorMessage(message);
+        setOnErrorRetry(() => () => {
+          setErrorMessage("");
+          nextView();
+        });
+        setOnErrorCancel(() => () => setErrorMessage(""));
       }
     } finally {
       setOverlayVisible(false);
     }
   };
 
-  const view = useStateStore(useShallow((state) => state.view));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This should run only once.
+  useEffect(() => {
+    loadPlugins();
+  }, []);
 
   return (
     <>
@@ -62,26 +151,19 @@ export default function Home() {
       <StateDebugger />
 
       {overlayVisible && (
-        <ProcessingOverlay title={overlayTitle} onCancel={abort}>
+        <ProcessingOverlay title={overlayTitle} onCancel={onOverlayCancel}>
           <Text as="div" size="6">
             {overlayMessage}
           </Text>
-          <Text className="tabular-nums" as="div" size="4" color="lime">
-            {overlayTokenCount ? `Tokens generated: ${overlayTokenCount}` : "Waiting for response..."}
-          </Text>
+          {overlayTokenCount >= 0 && (
+            <Text className="tabular-nums" as="div" size="4" color="lime">
+              {overlayTokenCount > 0 ? `Tokens generated: ${overlayTokenCount}` : "Waiting for response..."}
+            </Text>
+          )}
         </ProcessingOverlay>
       )}
 
-      {errorMessage && (
-        <ErrorPopup
-          errorMessage={errorMessage}
-          onRetry={() => {
-            setErrorMessage("");
-            nextView();
-          }}
-          onCancel={() => setErrorMessage("")}
-        />
-      )}
+      {errorMessage && <ErrorPopup errorMessage={errorMessage} onRetry={onErrorRetry} onCancel={onErrorCancel} />}
     </>
   );
 }

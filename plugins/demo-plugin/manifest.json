@@ -1,0 +1,7 @@
+{
+  "name": "Demo Plugin",
+  "main": "main.js",
+  "settings": {
+    "loggingEnabled": true
+  }
+}

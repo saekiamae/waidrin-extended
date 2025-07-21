@@ -11,7 +11,7 @@ export default function ProcessingOverlay({
   children,
 }: {
   title: string;
-  onCancel: () => void;
+  onCancel?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -36,9 +36,11 @@ export default function ProcessingOverlay({
           {children}
         </Flex>
 
-        <Button variant="classic" color="red" size="4" mt="6" onClick={onCancel}>
-          <Text size="6">Cancel</Text>
-        </Button>
+        {onCancel && (
+          <Button variant="classic" color="red" size="4" mt="6" onClick={onCancel}>
+            <Text size="6">Cancel</Text>
+          </Button>
+        )}
       </Flex>
     </Flex>
   );

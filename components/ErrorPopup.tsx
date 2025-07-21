@@ -9,8 +9,8 @@ export default function ErrorPopup({
   onCancel,
 }: {
   errorMessage: string;
-  onRetry: () => void;
-  onCancel: () => void;
+  onRetry?: () => void;
+  onCancel?: () => void;
 }) {
   return (
     <AlertDialog.Root open={true}>
@@ -24,23 +24,23 @@ export default function ErrorPopup({
           <Text className="font-mono" size="3" color="red">
             {errorMessage}
           </Text>
-          <Text className="block mt-4">
-            The most common cause of errors are connection problems. Make sure your llama.cpp server is running and
-            reachable on the address you provided.
-          </Text>
         </AlertDialog.Description>
 
         <Flex gap="3" mt="6" justify="end">
-          <AlertDialog.Cancel>
-            <Button variant="classic" color="gray" size="3" onClick={onCancel}>
-              <Text size="6">Cancel</Text>
-            </Button>
-          </AlertDialog.Cancel>
-          <AlertDialog.Action>
-            <Button variant="classic" size="3" onClick={onRetry}>
-              <Text size="6">Retry</Text>
-            </Button>
-          </AlertDialog.Action>
+          {onCancel && (
+            <AlertDialog.Cancel>
+              <Button variant="classic" color="gray" size="3" onClick={onCancel}>
+                <Text size="6">Cancel</Text>
+              </Button>
+            </AlertDialog.Cancel>
+          )}
+          {onRetry && (
+            <AlertDialog.Action>
+              <Button variant="classic" size="3" onClick={onRetry}>
+                <Text size="6">Retry</Text>
+              </Button>
+            </AlertDialog.Action>
+          )}
         </Flex>
       </AlertDialog.Content>
     </AlertDialog.Root>

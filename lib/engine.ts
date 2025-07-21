@@ -22,6 +22,7 @@ import * as schemas from "./schemas";
 import {
   type Actions,
   initialState,
+  type Location,
   type LocationChangeEvent,
   type NarrationEvent,
   type State,
@@ -205,6 +206,14 @@ export async function next(
       { leading: true, trailing: true },
     );
 
+    const onLocationChange = async (newLocation: Location) => {
+      for (const plugin of state.plugins) {
+        if (plugin.enabled && plugin.plugin && plugin.plugin.onLocationChange) {
+          await plugin.plugin.onLocationChange(newLocation, state);
+        }
+      }
+    };
+
     const narrate = async (action?: string) => {
       const event: NarrationEvent = {
         type: "narration",
@@ -283,7 +292,11 @@ export async function next(
         state.view = "scenario";
       } else if (state.view === "scenario") {
         step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
-        state.locations = [await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken)];
+        const location = await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken);
+
+        await onLocationChange(location);
+
+        state.locations = [location];
         const locationIndex = state.locations.length - 1;
         state.protagonist.locationIndex = locationIndex;
 
@@ -327,6 +340,8 @@ export async function next(
 
           step = ["Generating location", "This typically takes between 10 and 30 seconds"];
           const newLocationInfo = await getResponseAsObject(generateNewLocationPrompt(state), schema, onToken);
+
+          await onLocationChange(newLocationInfo.newLocation);
 
           state.locations.push(newLocationInfo.newLocation);
           const locationIndex = state.locations.length - 1;

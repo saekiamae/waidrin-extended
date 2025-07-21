@@ -63,20 +63,41 @@ export const initialState: State = schemas.State.parse({
   actions: [],
 });
 
-const setAsyncMutex = new Mutex();
+export type Plugin = Partial<{
+  // The context is determined by the environment in which the plugin runs,
+  // e.g. a frontend that provides methods for adding custom components.
+  init(settings: Record<string, unknown>, context: unknown): Promise<void>;
+  onLocationChange(newLocation: Location, state: WritableDraft<State>): Promise<void>;
+}>;
+
+export interface PluginWrapper {
+  name: string;
+  enabled: boolean;
+  settings: Record<string, unknown>;
+  plugin: Plugin;
+}
+
+export interface Plugins {
+  plugins: PluginWrapper[];
+}
 
 export interface Actions {
   set: (
-    nextStateOrUpdater: State | Partial<State> | ((state: WritableDraft<State>) => void),
+    nextStateOrUpdater: StoredState | Partial<StoredState> | ((state: WritableDraft<StoredState>) => void),
     shouldReplace?: false,
   ) => void;
-  setAsync: (updater: (state: WritableDraft<State>) => Promise<void>) => Promise<void>;
+  setAsync: (updater: (state: WritableDraft<StoredState>) => Promise<void>) => Promise<void>;
 }
 
-export const useStateStore = create<State & Actions>()(
+export type StoredState = State & Plugins & Actions;
+
+const setAsyncMutex = new Mutex();
+
+export const useStateStore = create<StoredState>()(
   persist(
     immer((set, get) => ({
       ...initialState,
+      plugins: [],
       set: set,
       setAsync: async (updater) => {
         await setAsyncMutex.runExclusive(async () => {

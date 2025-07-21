@@ -40,3 +40,7 @@ next-env.d.ts
 
 # editors
 /.vscode/
+
+# plugins
+/plugins/*
+!/plugins/demo-plugin/
