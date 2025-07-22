@@ -50,6 +50,8 @@ export default function Home() {
         const response = await fetch("/plugins");
         const manifests: Manifest[] = await response.json();
 
+        state.backends = {};
+
         outer: for (const manifest of manifests) {
           let pluginWrapper: PluginWrapper | null = null;
 
@@ -73,6 +75,10 @@ export default function Home() {
 
           if (plugin.init) {
             await plugin.init(pluginWrapper ? current(pluginWrapper.settings) : manifest.settings, undefined);
+          }
+
+          if (plugin.getBackends) {
+            Object.assign(state.backends, await plugin.getBackends());
           }
 
           if (pluginWrapper) {

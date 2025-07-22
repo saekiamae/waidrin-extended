@@ -7,6 +7,7 @@ import type * as z from "zod/v4";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import type { Backend } from "./backend";
 import * as schemas from "./schemas";
 
 export type View = z.infer<typeof schemas.View>;
@@ -67,6 +68,9 @@ export type Plugin = Partial<{
   // The context is determined by the environment in which the plugin runs,
   // e.g. a frontend that provides methods for adding custom components.
   init(settings: Record<string, unknown>, context: unknown): Promise<void>;
+
+  getBackends(): Promise<Record<string, Backend>>;
+
   onLocationChange(newLocation: Location, state: WritableDraft<State>): Promise<void>;
 }>;
 
@@ -79,6 +83,8 @@ export interface PluginWrapper {
 
 export interface Plugins {
   plugins: PluginWrapper[];
+  backends: Record<string, Backend>;
+  activeBackend: string;
 }
 
 export interface Actions {
@@ -98,6 +104,8 @@ export const useStateStore = create<StoredState>()(
     immer((set, get) => ({
       ...initialState,
       plugins: [],
+      backends: {},
+      activeBackend: "",
       set: set,
       setAsync: async (updater) => {
         await setAsyncMutex.runExclusive(async () => {
@@ -127,3 +135,7 @@ export const useStateStore = create<StoredState>()(
     },
   ),
 );
+
+export function getState(): StoredState {
+  return useStateStore.getState();
+}

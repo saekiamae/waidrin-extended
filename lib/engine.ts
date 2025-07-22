@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025  Philipp Emanuel Weidmann <pew@worldwidemann.com>
 
-import { current, isDraft } from "immer";
+import { current } from "immer";
 import { throttle } from "lodash";
-import OpenAI from "openai";
 import * as z from "zod/v4";
+import { getBackend } from "./backend";
 import {
-  checkConnectionPrompt,
   checkIfSameLocationPrompt,
   generateActionsPrompt,
   generateNewCharactersPrompt,
@@ -19,171 +18,21 @@ import {
   type Prompt,
 } from "./prompts";
 import * as schemas from "./schemas";
-import {
-  type Actions,
-  initialState,
-  type Location,
-  type LocationChangeEvent,
-  type NarrationEvent,
-  type State,
-  useStateStore,
-} from "./state";
+import { getState, initialState, type Location, type LocationChangeEvent, type NarrationEvent } from "./state";
 
 // When generating a character, the location isn't determined yet.
 const RawCharacter = schemas.Character.omit({ locationIndex: true });
 
-function getState(): State & Actions {
-  return useStateStore.getState();
-}
-
-let controller = new AbortController();
-
-export function abort(): void {
-  controller.abort();
-}
-
-export function isAbortError(error: unknown): boolean {
-  return error instanceof OpenAI.APIUserAbortError;
-}
-
-async function* getResponseStream(prompt: Prompt, params: Record<string, unknown> = {}): AsyncGenerator<string> {
-  try {
-    const client = new OpenAI({
-      baseURL: `${getState().apiUrl}/v1/`,
-      apiKey: "",
-      dangerouslyAllowBrowser: true,
-    });
-
-    const stream = await client.chat.completions.create(
-      {
-        stream: true,
-        model: "",
-        messages: [
-          { role: "system", content: prompt.system },
-          { role: "user", content: prompt.user },
-        ],
-        // These are hardcoded because the required number depends on
-        // what is being prompted for, which is also hardcoded.
-        max_tokens: 4096,
-        // Both variants need to be provided, as newer OpenAI models
-        // don't support max_tokens, while some inference engines don't
-        // support max_completion_tokens.
-        max_completion_tokens: 4096,
-        ...params,
-      },
-      { signal: controller.signal },
-    );
-
-    for await (const chunk of stream) {
-      if (chunk.choices.length === 0) {
-        // We must return directly here instead of just breaking the loop,
-        // because the OpenAI library calls controller.abort() if streaming
-        // is stopped, which would trigger the error-throwing code below.
-        return;
-      }
-
-      const choice = chunk.choices[0];
-
-      if (choice.delta.content) {
-        yield choice.delta.content;
-      }
-
-      if (choice.finish_reason) {
-        return;
-      }
-    }
-
-    // The OpenAI library only throws this error if abort() is called
-    // during the request itself, not if it is called while the
-    // response is being streamed. We throw it manually in this case,
-    // so error handling code can easily detect whether an error
-    // is the result of a user abort.
-    if (stream.controller.signal.aborted) {
-      throw new OpenAI.APIUserAbortError();
-    }
-  } finally {
-    // An AbortController cannot be reused after calling abort().
-    // Reset the controller so a new one is available for the next operation
-    // in case this operation was aborted.
-    controller = new AbortController();
-  }
-}
-
-async function getResponse(
-  prompt: Prompt,
-  params: Record<string, unknown> = {},
-  onToken?: (token: string, count: number) => void,
-): Promise<string> {
-  const state = getState();
-
-  if (state.logPrompts) {
-    console.log(prompt.user);
-  }
-
-  if (state.logParams) {
-    console.log(isDraft(params) ? current(params) : params);
-  }
-
-  let response = "";
-  let count = 0;
-
-  // Send empty update at the start of the streaming process
-  // to facilitate displaying progress indicators.
-  if (onToken) {
-    onToken("", 0);
-  }
-
-  for await (const token of getResponseStream(prompt, params)) {
-    response += token;
-    count++;
-
-    if (onToken) {
-      onToken(token, count);
-    }
-  }
-
-  if (state.logResponses) {
-    console.log(response);
-  }
-
-  return response;
-}
-
-async function getResponseAsObject<Schema extends z.ZodType, Type extends z.infer<Schema>>(
-  prompt: Prompt,
-  schema: Schema,
-  onToken?: (token: string, count: number) => void,
-): Promise<Type> {
-  const response = await getResponse(
-    prompt,
-    {
-      ...getState().generationParams,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "FooBar",
-          strict: true,
-          schema: z.toJSONSchema(schema),
-        },
-      },
-    },
-    onToken,
-  );
-
-  return schema.parse(JSON.parse(response)) as Type;
-}
-
-async function getResponseAsBoolean(
-  prompt: Prompt,
-  onToken?: (token: string, count: number) => void,
-): Promise<boolean> {
-  return (await getResponseAsObject(prompt, z.enum(["yes", "no"]), onToken)) === "yes";
+async function getBoolean(prompt: Prompt, onToken?: (token: string, count: number) => void): Promise<boolean> {
+  return (await getBackend().getObject(prompt, z.enum(["yes", "no"]), onToken)) === "yes";
 }
 
 export async function next(
   action?: string,
   onProgress?: (title: string, message: string, tokenCount: number) => void,
 ): Promise<void> {
+  const backend = getBackend();
+
   await getState().setAsync(async (state) => {
     let step: [string, string];
 
@@ -225,15 +74,11 @@ export async function next(
       state.events.push(event);
 
       step = ["Narrating", ""];
-      event.text = await getResponse(
-        narratePrompt(state, action),
-        state.narrationParams,
-        (token: string, count: number) => {
-          event.text += token;
-          onToken(token, count);
-          updateState();
-        },
-      );
+      event.text = await backend.getNarration(narratePrompt(state, action), (token: string, count: number) => {
+        event.text += token;
+        onToken(token, count);
+        updateState();
+      });
 
       const referencedCharacterIndices = new Set<number>();
 
@@ -276,23 +121,26 @@ export async function next(
         state.view = "connection";
       } else if (state.view === "connection") {
         step = ["Checking connection", "If this takes longer than a few seconds, there is probably something wrong"];
-        await getResponse(checkConnectionPrompt, {}, onToken);
+        const testObject = await backend.getObject({ system: "test", user: "test" }, z.literal("waidrin"), onToken);
+        if (testObject !== "waidrin") {
+          throw new Error("Backend does not support schema constraints");
+        }
 
         state.view = "genre";
       } else if (state.view === "genre") {
         state.view = "character";
       } else if (state.view === "character") {
         step = ["Generating world", "This typically takes between 10 and 30 seconds"];
-        state.world = await getResponseAsObject(generateWorldPrompt, schemas.World, onToken);
+        state.world = await backend.getObject(generateWorldPrompt, schemas.World, onToken);
 
         step = ["Generating protagonist", "This typically takes between 10 and 30 seconds"];
-        state.protagonist = await getResponseAsObject(generateProtagonistPrompt(state), RawCharacter, onToken);
+        state.protagonist = await backend.getObject(generateProtagonistPrompt(state), RawCharacter, onToken);
         state.protagonist.locationIndex = 0;
 
         state.view = "scenario";
       } else if (state.view === "scenario") {
         step = ["Generating starting location", "This typically takes between 10 and 30 seconds"];
-        const location = await getResponseAsObject(generateStartingLocationPrompt(state), schemas.Location, onToken);
+        const location = await backend.getObject(generateStartingLocationPrompt(state), schemas.Location, onToken);
 
         await onLocationChange(location);
 
@@ -301,7 +149,7 @@ export async function next(
         state.protagonist.locationIndex = locationIndex;
 
         step = ["Generating characters", "This typically takes between 30 seconds and 1 minute"];
-        const characters = await getResponseAsObject(
+        const characters = await backend.getObject(
           generateStartingCharactersPrompt(state),
           RawCharacter.array().length(5),
           onToken,
@@ -332,14 +180,14 @@ export async function next(
         await narrate(action);
 
         step = ["Checking for location change", "This typically takes a few seconds"];
-        if (!(await getResponseAsBoolean(checkIfSameLocationPrompt(state), onToken))) {
+        if (!(await getBoolean(checkIfSameLocationPrompt(state), onToken))) {
           const schema = z.object({
             newLocation: schemas.Location,
             accompanyingCharacters: z.enum(state.characters.map((character) => character.name)).array(),
           });
 
           step = ["Generating location", "This typically takes between 10 and 30 seconds"];
-          const newLocationInfo = await getResponseAsObject(generateNewLocationPrompt(state), schema, onToken);
+          const newLocationInfo = await backend.getObject(generateNewLocationPrompt(state), schema, onToken);
 
           await onLocationChange(newLocationInfo.newLocation);
 
@@ -368,11 +216,7 @@ export async function next(
           updateState();
 
           step = ["Generating characters", "This typically takes between 30 seconds and 1 minute"];
-          const characters = await getResponseAsObject(
-            generateCharactersPrompt,
-            RawCharacter.array().length(5),
-            onToken,
-          );
+          const characters = await backend.getObject(generateCharactersPrompt, RawCharacter.array().length(5), onToken);
           state.characters.push(...characters.map((character) => ({ ...character, locationIndex })));
 
           for (let i = state.characters.length - characters.length; i < state.characters.length; i++) {
@@ -383,7 +227,7 @@ export async function next(
         }
 
         step = ["Generating actions", "This typically takes a few seconds"];
-        state.actions = await getResponseAsObject(
+        state.actions = await backend.getObject(
           generateActionsPrompt(state),
           schemas.Action.array().length(3),
           onToken,
@@ -426,4 +270,12 @@ export function back(): void {
 
 export function reset(): void {
   getState().set(initialState);
+}
+
+export function abort(): void {
+  getBackend().abort();
+}
+
+export function isAbortError(error: unknown): boolean {
+  return getBackend().isAbortError(error);
 }

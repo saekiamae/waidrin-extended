@@ -24,11 +24,6 @@ function makePrompt(userPrompt: string): Prompt {
   };
 }
 
-export const checkConnectionPrompt: Prompt = {
-  system: "You are a helpful assistant.",
-  user: "If you see this message, respond with 'ok', and nothing else.",
-};
-
 export const generateWorldPrompt = makePrompt(`
 Create a fictional world for a fantasy adventure RPG and return its name
 and a short description (100 words maximum) as a JSON object.
