@@ -8,7 +8,7 @@ import { useState } from "react";
 import { GiAllSeeingEye } from "react-icons/gi";
 import { RxCross2 } from "react-icons/rx";
 import { useShallow } from "zustand/shallow";
-import { useStateStore } from "@/lib/state";
+import { type StoredState, useStateStore } from "@/lib/state";
 
 // https://github.com/mac-s-g/react-json-view/issues/121#issuecomment-2578199942
 const ReactJsonView = dynamic(() => import("@microlink/react-json-view"), { ssr: false });
@@ -24,6 +24,14 @@ export default function StateDebugger() {
       setState: state.set,
     })),
   );
+
+  // Remove properties containing functions to avoid corrupting them,
+  // as functions cannot be edited and would be overwritten by garbage.
+  const filteredState: Partial<StoredState> = { ...state };
+  delete filteredState.plugins;
+  delete filteredState.backends;
+  delete filteredState.set;
+  delete filteredState.setAsync;
 
   return (
     <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen} modal={false}>
@@ -53,10 +61,7 @@ export default function StateDebugger() {
             <Dialog.Title className="DialogTitle">State debugger</Dialog.Title>
           </VisuallyHidden>
           <ReactJsonView
-            src={
-              // Filter out actions for display purposes.
-              Object.fromEntries(Object.entries(state).filter(([_, value]) => typeof value !== "function"))
-            }
+            src={filteredState}
             name="state"
             theme="twilight"
             displayObjectSize={false}
