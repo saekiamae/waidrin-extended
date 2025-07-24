@@ -22,11 +22,15 @@ import Welcome from "@/views/Welcome";
 import type { Manifest } from "./plugins/route";
 
 export default function Home() {
-  const [overlayVisible, setOverlayVisible] = useState(false);
-  const [overlayTitle, setOverlayTitle] = useState("");
-  const [overlayMessage, setOverlayMessage] = useState("");
-  const [overlayTokenCount, setOverlayTokenCount] = useState(0);
+  const [stateLoaded, setStateLoaded] = useState(false);
+  const [pluginsLoaded, setPluginsLoaded] = useState(false);
+
+  const [overlayVisible, setOverlayVisible] = useState(true);
+  const [overlayTitle, setOverlayTitle] = useState("Loading");
+  const [overlayMessage, setOverlayMessage] = useState("Restoring state...");
+  const [overlayTokenCount, setOverlayTokenCount] = useState(-1);
   const [onOverlayCancel, setOnOverlayCancel] = useState<(() => void) | undefined>(undefined);
+
   const [errorMessage, setErrorMessage] = useState("");
   const [onErrorRetry, setOnErrorRetry] = useState<(() => void) | undefined>(undefined);
   const [onErrorCancel, setOnErrorCancel] = useState<(() => void) | undefined>(undefined);
@@ -40,8 +44,8 @@ export default function Home() {
 
   const loadPlugins = async () => {
     setOverlayVisible(true);
-    setOverlayTitle("Loading plugins");
-    setOverlayMessage("Loading manifests...");
+    setOverlayTitle("Loading");
+    setOverlayMessage("Loading plugin manifests...");
     setOverlayTokenCount(-1);
     setOnOverlayCancel(undefined);
 
@@ -96,6 +100,8 @@ export default function Home() {
           }
         }
       });
+
+      setPluginsLoaded(true);
     } catch (error) {
       let message = error instanceof Error ? error.message : String(error);
       if (!message) {
@@ -139,22 +145,40 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (useStateStore.persist.hasHydrated()) {
+      setStateLoaded(true);
+    } else {
+      const unsubscribe = useStateStore.persist.onFinishHydration(() => {
+        setStateLoaded(true);
+      });
+
+      return unsubscribe;
+    }
+  }, []);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: This should run only once.
   useEffect(() => {
-    loadPlugins();
-  }, []);
+    if (stateLoaded) {
+      loadPlugins();
+    }
+  }, [stateLoaded]);
 
   return (
     <>
-      {view === "welcome" && <Welcome onNext={nextView} />}
-      {view === "connection" && <ConnectionSetup onNext={nextView} onBack={back} />}
-      {view === "genre" && <GenreSelect onNext={nextView} onBack={back} />}
-      {view === "character" && <CharacterSelect onNext={nextView} onBack={back} />}
-      {view === "scenario" && <ScenarioSetup onNext={nextView} onBack={back} />}
-      {view === "chat" && <Chat />}
+      {stateLoaded && pluginsLoaded && (
+        <>
+          {view === "welcome" && <Welcome onNext={nextView} />}
+          {view === "connection" && <ConnectionSetup onNext={nextView} onBack={back} />}
+          {view === "genre" && <GenreSelect onNext={nextView} onBack={back} />}
+          {view === "character" && <CharacterSelect onNext={nextView} onBack={back} />}
+          {view === "scenario" && <ScenarioSetup onNext={nextView} onBack={back} />}
+          {view === "chat" && <Chat />}
 
-      <MainMenu />
-      <StateDebugger />
+          <MainMenu />
+          <StateDebugger />
+        </>
+      )}
 
       {overlayVisible && (
         <ProcessingOverlay title={overlayTitle} onCancel={onOverlayCancel}>
