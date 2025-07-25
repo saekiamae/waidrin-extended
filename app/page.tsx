@@ -19,6 +19,7 @@ import ConnectionSetup from "@/views/ConnectionSetup";
 import GenreSelect from "@/views/GenreSelect";
 import ScenarioSetup from "@/views/ScenarioSetup";
 import Welcome from "@/views/Welcome";
+import { Context } from "./plugins";
 import type { Manifest } from "./plugins/route";
 
 export default function Home() {
@@ -78,7 +79,8 @@ export default function Home() {
           const plugin: Plugin = new pluginClass();
 
           if (plugin.init) {
-            await plugin.init(pluginWrapper ? current(pluginWrapper.settings) : manifest.settings, undefined);
+            const context = new Context(manifest.name);
+            await plugin.init(pluginWrapper ? current(pluginWrapper.settings) : manifest.settings, context);
           }
 
           if (plugin.getBackends) {

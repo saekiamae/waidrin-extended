@@ -78,6 +78,8 @@ export const Event = z.discriminatedUnion("type", [
 
 export const State = z.object({
   apiUrl: z.url(),
+  apiKey: z.string().trim(),
+  model: z.string().trim(),
   generationParams: RequestParams,
   narrationParams: RequestParams,
   updateInterval: z.int(),

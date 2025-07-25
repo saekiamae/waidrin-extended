@@ -27,7 +27,9 @@ export type Event = z.infer<typeof schemas.Event>;
 export type State = z.infer<typeof schemas.State>;
 
 export const initialState: State = schemas.State.parse({
-  apiUrl: "http://localhost:8080",
+  apiUrl: "http://localhost:8080/v1/",
+  apiKey: "",
+  model: "",
   generationParams: {
     temperature: 0.5,
   },
@@ -105,7 +107,7 @@ export const useStateStore = create<StoredState>()(
       ...initialState,
       plugins: [],
       backends: {},
-      activeBackend: "",
+      activeBackend: "default",
       set: set,
       setAsync: async (updater) => {
         await setAsyncMutex.runExclusive(async () => {
