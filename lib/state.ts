@@ -134,6 +134,22 @@ export const useStateStore = create<StoredState>()(
     })),
     {
       name: "state",
+      partialize: (state) => {
+        // Don't persist functions and class instances.
+        const persistedState: Partial<StoredState> = { ...state };
+
+        persistedState.plugins = state.plugins.map((plugin) => {
+          const persistedPlugin: Partial<PluginWrapper> = { ...plugin };
+          delete persistedPlugin.plugin;
+          return persistedPlugin as PluginWrapper;
+        });
+
+        delete persistedState.backends;
+        delete persistedState.set;
+        delete persistedState.setAsync;
+
+        return persistedState;
+      },
     },
   ),
 );
