@@ -23,23 +23,39 @@ export interface Backend {
   isAbortError(error: unknown): boolean;
 }
 
-class DefaultBackend implements Backend {
+export interface DefaultBackendSettings {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  generationParams: Record<string, unknown>;
+  narrationParams: Record<string, unknown>;
+}
+
+export class DefaultBackend implements Backend {
   controller = new AbortController();
+
+  // Can be overridden by subclasses to provide custom settings.
+  getSettings(): DefaultBackendSettings {
+    return getState();
+  }
+
+  // Can be overridden by subclasses to customize the client.
+  getClient(): OpenAI {
+    const settings = this.getSettings();
+
+    return new OpenAI({
+      baseURL: settings.apiUrl,
+      apiKey: settings.apiKey,
+      dangerouslyAllowBrowser: true,
+    });
+  }
 
   async *getResponseStream(prompt: Prompt, params: Record<string, unknown> = {}): AsyncGenerator<string> {
     try {
-      const state = getState();
-
-      const client = new OpenAI({
-        baseURL: state.apiUrl,
-        apiKey: state.apiKey,
-        dangerouslyAllowBrowser: true,
-      });
-
-      const stream = await client.chat.completions.create(
+      const stream = await this.getClient().chat.completions.create(
         {
           stream: true,
-          model: state.model,
+          model: this.getSettings().model,
           messages: [
             { role: "system", content: prompt.system },
             { role: "user", content: prompt.user },
@@ -128,7 +144,7 @@ class DefaultBackend implements Backend {
   }
 
   async getNarration(prompt: Prompt, onToken?: TokenCallback): Promise<string> {
-    return await this.getResponse(prompt, getState().narrationParams, onToken);
+    return await this.getResponse(prompt, this.getSettings().narrationParams, onToken);
   }
 
   async getObject<Schema extends z.ZodType, Type extends z.infer<Schema>>(
@@ -139,7 +155,7 @@ class DefaultBackend implements Backend {
     const response = await this.getResponse(
       prompt,
       {
-        ...getState().generationParams,
+        ...this.getSettings().generationParams,
         response_format: {
           type: "json_schema",
           json_schema: {
