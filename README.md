@@ -18,6 +18,15 @@ but they can also provide a different action as freeform text. This blends a cla
 CYOA experience with the limitless freedom of generative AI. It's an RPG unlike
 any other.
 
+## This fork's goal
+
+This fork is made for adding new features to the project even if it means using untested or cutting edge libraries.
+The goal is to deliver as many useful features as possible.
+
+While I will try to keep the code high-quality, it may not be as professional as some other corporation-grade code-bases.
+
+Here, making the project fun, useful and working comes first!
+
 
 ## Main story interface
 
